@@ -14,7 +14,6 @@
 
 #define CMDBUF_SIZE	80	// enough for one VGA text line
 
-
 struct Command {
 	const char *name;
 	const char *desc;
@@ -25,6 +24,8 @@ struct Command {
 static struct Command commands[] = {
 	{ "help", "Display this list of commands", mon_help },
 	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
+	{ "backtrace", "Display all trace", mon_backtrace },
+	{ "mappings", "Set / Watch / See about address", mon_mappings},
 };
 
 /***** Implementations of basic kernel monitor commands *****/
@@ -59,9 +60,59 @@ int
 mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 {
 	// Your code here.
+	cprintf("Stack backtrace:\n");
+	uint32_t* ebp = (uint32_t*)read_ebp();
+	struct Eipdebuginfo subInfo;
+	while(ebp){
+		cprintf("  ebp %08x  eip %08x  args %08x %08x %08x %08x %08x\n",\
+			ebp, *(ebp + 1), *(ebp + 2), *(ebp + 3), *(ebp + 4), \
+			*(ebp + 5), *(ebp + 6));
+		debuginfo_eip(*(ebp + 1), &subInfo);
+		cprintf("       %s:%d: %.*s+%d\n", subInfo.eip_file, subInfo.eip_line, \
+			subInfo.eip_fn_namelen, subInfo.eip_fn_name, *(ebp + 1) - subInfo.eip_fn_addr);
+		ebp = (uint32_t*)*ebp;
+	}
 	return 0;
 }
 
+int
+mon_mappings(int argc, char **argv, struct Trapframe *tf){
+	char *tempA;
+	char *tempB;
+	int flag = 0;
+	if(argc < 3){
+		cprintf("usage: mappings [set/show] startaddr endaddr [perm]\n");
+	}else{
+		if(!strcmp(argv[1], "set") || (flag = (!strcmp(argv[1], "show")))){
+			tempA = (void *)strtol(argv[2], NULL, 16);
+			tempB = (void *)strtol(argv[3], NULL, 16);
+		}else{
+			tempA = (void *)strtol(argv[1], NULL, 16);
+			tempB = (void *)strtol(argv[2], NULL, 16);
+		}
+		while(tempA <= tempB){
+			pte_t *subAddr = pgdir_walk(kern_pgdir, tempA, 1);
+			if(!*subAddr){
+				cprintf("No Page here!\n");
+				return 0;
+			}
+			cprintf("Phy Addr: %p, Perms: %d\n", PTE_ADDR(*subAddr), (int)*subAddr & 0x3ff);
+			if(flag){
+				for(int i = (int)tempA; i < (int)tempB && i < PGSIZE; i += 0x10){
+					for(int j = 0; j < 0x10 && (i + j) < (int)tempB; j++){
+						cprintf("%x ", tempA[i * 0x10 + j]);
+					}
+					cprintf("\n");
+				}
+			}
+			if(argv[4]){
+				*subAddr = PTE_ADDR(subAddr) & strtol(argv[4], NULL, 10);
+			}
+			tempA += PGSIZE;
+		}
+	}
+	return 0;
+}
 
 
 /***** Kernel monitor command interpreter *****/
