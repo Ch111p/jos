@@ -10,9 +10,9 @@
 #include <kern/console.h>
 #include <kern/monitor.h>
 #include <kern/kdebug.h>
+#include <kern/pmap.h>
 
 #define CMDBUF_SIZE	80	// enough for one VGA text line
-
 
 struct Command {
 	const char *name;
@@ -25,6 +25,7 @@ static struct Command commands[] = {
 	{ "help", "Display this list of commands", mon_help },
 	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
 	{ "backtrace", "Display all trace", mon_backtrace },
+	{ "mappings", "Set / Watch / See about address", mon_mappings},
 };
 
 /***** Implementations of basic kernel monitor commands *****/
@@ -74,6 +75,44 @@ mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 	return 0;
 }
 
+int
+mon_mappings(int argc, char **argv, struct Trapframe *tf){
+	char *tempA;
+	char *tempB;
+	int flag = 0;
+	if(argc < 3){
+		cprintf("usage: mappings [set/show] startaddr endaddr [perm]\n");
+	}else{
+		if(!strcmp(argv[1], "set") || (flag = (!strcmp(argv[1], "show")))){
+			tempA = (void *)strtol(argv[2], NULL, 16);
+			tempB = (void *)strtol(argv[3], NULL, 16);
+		}else{
+			tempA = (void *)strtol(argv[1], NULL, 16);
+			tempB = (void *)strtol(argv[2], NULL, 16);
+		}
+		while(tempA <= tempB){
+			pte_t *subAddr = pgdir_walk(kern_pgdir, tempA, 1);
+			if(!*subAddr){
+				cprintf("No Page here!\n");
+				return 0;
+			}
+			cprintf("Phy Addr: %p, Perms: %d\n", PTE_ADDR(*subAddr), (int)*subAddr & 0x3ff);
+			if(flag){
+				for(int i = (int)tempA; i < (int)tempB && i < PGSIZE; i += 0x10){
+					for(int j = 0; j < 0x10 && (i + j) < (int)tempB; j++){
+						cprintf("%x ", tempA[i * 0x10 + j]);
+					}
+					cprintf("\n");
+				}
+			}
+			if(argv[4]){
+				*subAddr = PTE_ADDR(subAddr) & strtol(argv[4], NULL, 10);
+			}
+			tempA += PGSIZE;
+		}
+	}
+	return 0;
+}
 
 
 /***** Kernel monitor command interpreter *****/
