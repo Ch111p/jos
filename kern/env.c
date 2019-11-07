@@ -275,10 +275,11 @@ region_alloc(struct Env *e, void *va, size_t len)
 	//   You should round va down, and round (va + len) up.
 	//   (Watch out for corner-cases!)
 	void *addr = ROUNDDOWN(va, PGSIZE);
-	size_t size = ROUNDUP(len, PGSIZE);
+	cprintf("%p\n", (unsigned int)va + len);
 	
-	for(unsigned int i = (unsigned int)addr; i < (unsigned int)addr + size; i+=PGSIZE)
+	for(size_t i = (size_t)addr; i < (unsigned int)va + len; i+=PGSIZE)
 	{
+		cprintf("%p\n", i);
 		struct PageInfo *tempAddr = NULL;
 		if(!(tempAddr = page_alloc(ALLOC_ZERO)))
 		{
@@ -348,6 +349,7 @@ load_icode(struct Env *e, uint8_t *binary)
 		panic("Error ELF");
 	}
 	struct Proghdr *tempHdr = (struct Proghdr *)(binary + tempHeader->e_phoff);
+	lcr3(PADDR(e->env_pgdir));
 	for(size_t i = 0; i < tempHeader->e_phnum; i++)
 	{
 		if(tempHdr[i].p_type == ELF_PROG_LOAD)
@@ -358,35 +360,37 @@ load_icode(struct Env *e, uint8_t *binary)
 			assert(tempHdr[i].p_filesz <= tempHdr[i].p_memsz);
 			region_alloc(e, (void*)tempHdr[i].p_va, tempHdr[i].p_memsz);
 			cprintf("%p, %x\n",tempHdr[i].p_va, tempHdr[i].p_filesz);
-			if((offset = tempHdr[i].p_va % PGSIZE))
-			{
-				tempAddr = pgdir_walk(e->env_pgdir, (void*)(tempHdr[i].p_va), 0);
-				memcpy(KADDR(PTE_ADDR(*(tempAddr)) + offset), binary + tempHdr[i].p_offset, (tempHdr[i].p_filesz % PGSIZE) - offset);
-			}
-			for(j = (offset?PGSIZE:0); j < ROUNDUP(tempHdr[i].p_filesz, PGSIZE) - PGSIZE; j+=PGSIZE)
-			{
-				tempAddr = pgdir_walk(e->env_pgdir, (void*)(tempHdr[i].p_va + j), 0);
-				memcpy(KADDR(PTE_ADDR(*(tempAddr))), binary + tempHdr[i].p_offset + j, PGSIZE);
-			}
-			if(tempHdr[i].p_filesz >= PGSIZE - offset)
-			{
-				tempAddr = pgdir_walk(e->env_pgdir, (void*)(tempHdr[i].p_va + j), 0);
-				if(tempHdr[i].p_filesz % PGSIZE)
-				{
-					memcpy(KADDR(PTE_ADDR(*(tempAddr))), binary + tempHdr[i].p_offset + j, tempHdr[i].p_filesz % PGSIZE);
-				}
-				else
-				{
-					memcpy(KADDR(PTE_ADDR(*(tempAddr))), binary + tempHdr[i].p_offset + j, PGSIZE);
-				}
-			}
+			memset((void*)tempHdr[i].p_va, 0, tempHdr[i].p_memsz);
+			// if((offset = tempHdr[i].p_va % PGSIZE))
+			// {
+			// 	tempAddr = pgdir_walk(e->env_pgdir, (void*)(tempHdr[i].p_va), 0);
+			// 	memcpy(KADDR(PTE_ADDR(*(tempAddr)) + offset), binary + tempHdr[i].p_offset, (tempHdr[i].p_filesz % PGSIZE) - offset);
+			// }
+			// for(j = (offset?PGSIZE:0); j < ROUNDUP(tempHdr[i].p_filesz, PGSIZE) - PGSIZE; j+=PGSIZE)
+			// {
+			// 	tempAddr = pgdir_walk(e->env_pgdir, (void*)(tempHdr[i].p_va + j), 0);
+			// 	memcpy(KADDR(PTE_ADDR(*(tempAddr))), binary + tempHdr[i].p_offset + j, PGSIZE);
+			// }
+			// if(tempHdr[i].p_filesz >= PGSIZE - offset)
+			// {
+			// 	tempAddr = pgdir_walk(e->env_pgdir, (void*)(tempHdr[i].p_va + j), 0);
+			// 	if(tempHdr[i].p_filesz % PGSIZE)
+			// 	{
+			// 		memcpy(KADDR(PTE_ADDR(*(tempAddr))), binary + tempHdr[i].p_offset + j, tempHdr[i].p_filesz % PGSIZE);
+			// 	}
+			// 	else
+			// 	{
+			// 		memcpy(KADDR(PTE_ADDR(*(tempAddr))), binary + tempHdr[i].p_offset + j, PGSIZE);
+			// 	}
+			// }
+			memcpy((void*)tempHdr[i].p_va, tempHdr[i].p_offset + binary, tempHdr[i].p_filesz);
 		}
 	}
+	lcr3(PADDR(kern_pgdir));
 	e->env_tf.tf_eip = ((struct Elf*)binary)->e_entry;
 	// Now map one page for the program's initial stack
 	// at virtual address USTACKTOP - PGSIZE.
 	region_alloc(e, (void*)(USTACKTOP - PGSIZE), PGSIZE);
-	e->env_tf.tf_esp = USTACKTOP;
 	// LAB 3: Your code here.
 }
 
